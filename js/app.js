@@ -343,6 +343,7 @@
     saveSession();
     renderResults();
     showScreen('results');
+    if (window.confettiBurst) window.confettiBurst();
   }
 
   function handleDeckKeydown(ev) {
