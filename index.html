@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACCESSI-SWIPE — WCAG accessibility swipe game</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<a class="skip-link" href="#app">Skip to main content</a>
+<div class="visually-hidden" id="liveRegion" aria-live="polite"></div>
+
+<header class="app-header">
+  <h1><span aria-hidden="true">🏁</span> ACCESSI-SWIPE</h1>
+  <p class="tagline">Swipe through WCAG success criteria and see if your product measures up.</p>
+</header>
+
+<main id="app" tabindex="-1">
+
+  <!-- ===================== SETUP SCREEN ===================== -->
+  <section id="screen-setup" class="screen" aria-labelledby="setup-heading">
+    <h2 id="setup-heading" class="visually-hidden">Set up your deck</h2>
+
+    <div id="resumeBanner" class="resume-banner" hidden>
+      <p id="resumeText"></p>
+      <div class="resume-actions">
+        <button type="button" id="btnResume" class="btn btn-primary">Resume session</button>
+        <button type="button" id="btnDiscard" class="btn btn-ghost">Start new instead</button>
+      </div>
+    </div>
+
+    <form id="setupForm">
+      <fieldset class="field-group">
+        <legend>Test against WCAG version</legend>
+        <p class="hint">Each version includes everything from earlier versions.</p>
+        <label class="radio-row"><input type="radio" name="version" value="2.0"> 2.0</label>
+        <label class="radio-row"><input type="radio" name="version" value="2.1"> 2.1</label>
+        <label class="radio-row"><input type="radio" name="version" value="2.2" checked> 2.2 (latest)</label>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Conformance level</legend>
+        <label class="check-row"><input type="checkbox" name="level" value="A" checked> A</label>
+        <label class="check-row"><input type="checkbox" name="level" value="AA" checked> AA (most common target)</label>
+        <label class="check-row"><input type="checkbox" name="level" value="AAA"> AAA</label>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Deck order</legend>
+        <label class="check-row"><input type="checkbox" id="shuffleToggle" checked> Shuffle cards</label>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>How many questions?</legend>
+        <p class="hint">Full deck by default — lower it for a quick run.</p>
+        <label class="count-row">
+          <span>Questions to ask</span>
+          <input type="number" id="cardCountInput" name="cardCount" min="1" step="1">
+        </label>
+      </fieldset>
+
+      <p id="deckCount" class="deck-count" aria-live="polite"></p>
+
+      <button type="submit" class="btn btn-primary btn-large">Start swiping</button>
+    </form>
+  </section>
+
+  <!-- ===================== DECK SCREEN ===================== -->
+  <section id="screen-deck" class="screen" hidden aria-labelledby="deck-heading">
+    <h2 id="deck-heading" class="visually-hidden">Swipe through criteria</h2>
+
+    <div class="deck-toolbar">
+      <button type="button" id="btnExit" class="btn btn-ghost btn-small"><span aria-hidden="true">🏠</span> Exit</button>
+      <p id="progressText" class="progress-text"></p>
+      <button type="button" id="btnUndo" class="btn btn-ghost btn-small" disabled><span aria-hidden="true">↶</span> Undo</button>
+    </div>
+
+    <div id="cardStack" class="card-stack"></div>
+
+    <div class="action-row" role="group" aria-label="Verdict for this criterion">
+      <button type="button" id="btnFail" class="btn btn-fail">
+        <span aria-hidden="true">✗</span> Fails
+      </button>
+      <button type="button" id="btnNA" class="btn btn-na">
+        <span aria-hidden="true">➖</span> N/A
+      </button>
+      <button type="button" id="btnMeet" class="btn btn-meet">
+        <span aria-hidden="true">✓</span> Meets
+      </button>
+    </div>
+    <p class="hint keys-hint">Keyboard: ← fails · ↑ N/A · → meets · Z to undo</p>
+  </section>
+
+  <!-- ===================== RESULTS SCREEN ===================== -->
+  <section id="screen-results" class="screen" hidden aria-labelledby="results-heading">
+    <h2 id="results-heading">Your scorecard</h2>
+
+    <div class="score-hero">
+      <p class="score-big" id="scoreBig">--%</p>
+      <p class="score-sub" id="scoreSub"></p>
+    </div>
+
+    <div id="principleBreakdown" class="principle-breakdown"></div>
+
+    <div class="gap-section">
+      <h3>Gaps found</h3>
+      <ul id="gapList" class="gap-list"></ul>
+      <p id="noGaps" class="hint" hidden>No gaps — everything in the deck passed or was N/A. <span aria-hidden="true">🎉</span></p>
+    </div>
+
+    <div class="share-section">
+      <h3>Share your results</h3>
+      <textarea id="shareText" class="share-textarea" readonly rows="6"></textarea>
+      <div class="copy-row">
+        <button type="button" id="btnCopyShare" class="btn btn-ghost"><span aria-hidden="true">📋</span> Copy shareable summary</button>
+        <span id="copyStatus" class="copy-status" aria-hidden="true"></span>
+      </div>
+    </div>
+
+    <div class="export-row">
+      <button type="button" id="btnExportJson" class="btn btn-ghost"><span aria-hidden="true">⬇</span> Export JSON</button>
+      <button type="button" id="btnExportMd" class="btn btn-ghost"><span aria-hidden="true">⬇</span> Export Markdown</button>
+      <button type="button" id="btnStartOver" class="btn btn-primary">Start a new deck</button>
+    </div>
+  </section>
+
+</main>
+
+<script src="js/criteria-data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
