@@ -451,10 +451,45 @@
     URL.revokeObjectURL(url);
   }
 
+  const LEVEL_ORDER = ['A', 'AA', 'AAA'];
+  const PRINCIPLES = ['Perceivable', 'Operable', 'Understandable', 'Robust'];
+  const VERDICT_LABEL = { meets: '✅ Meets', fails: '❌ Doesn\'t meet', na: '➖ N/A' };
+
+  // W3C "Understanding" pages use a slug of the SC name. The WCAG 2.2 set
+  // covers every 2.0/2.1 criterion too (4.1.1 Parsing is kept as an obsolete page).
+  function understandingUrl(c) {
+    const slug = c.name.toLowerCase().replace(/[(),]/g, '').trim().replace(/\s+/g, '-');
+    return `https://www.w3.org/WAI/WCAG22/Understanding/${slug}`;
+  }
+
+  function compareCriteria(a, b) {
+    const lv = LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level);
+    if (lv !== 0) return lv;
+    const pa = a.id.split('.').map(Number), pb = b.id.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+    return 0;
+  }
+
+  function localDateStamp(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  // e.g. accessi-swipe-wcag2.2-A-AA-2026-11-11.md
+  function exportFilename(ext, date) {
+    const levels = LEVEL_ORDER.filter(l => session.levels.includes(l)).join('-');
+    return `accessi-swipe-wcag${session.versionTarget}-${levels}-${localDateStamp(date)}.${ext}`;
+  }
+
+  function pctText(meets, fails) {
+    return (meets + fails) === 0 ? '—' : `${Math.round((meets / (meets + fails)) * 100)}%`;
+  }
+
   function exportJson() {
     const score = computeScore();
+    const now = new Date();
     const payload = {
-      generatedAt: new Date().toISOString(),
+      generatedAt: now.toISOString(),
       wcagVersion: session.versionTarget,
       levels: session.levels,
       summary: { pct: score.pct, meets: score.meets, fails: score.fails, na: score.na },
@@ -464,43 +499,76 @@
         return {
           id: c.id, name: c.name, level: c.level, version: c.version,
           principle: c.principle, verdict: session.answers[id] || null,
+          understandingUrl: understandingUrl(c),
         };
       }),
     };
-    downloadFile('accessi-swipe-results.json', JSON.stringify(payload, null, 2), 'application/json');
+    downloadFile(exportFilename('json', now), JSON.stringify(payload, null, 2), 'application/json');
   }
 
   function exportMarkdown() {
     const score = computeScore();
+    const now = new Date();
+    const levels = LEVEL_ORDER.filter(l => session.levels.includes(l));
+    const answered = Object.keys(session.answers).length;
+    const naList = session.order.map(criterionById)
+      .filter(c => session.answers[c.id] === 'na').sort(compareCriteria);
     const lines = [];
-    lines.push(`# ACCESSI-SWIPE Results`);
-    lines.push('');
-    lines.push(`Generated: ${new Date().toISOString()}`);
-    lines.push(`Tested against: WCAG ${session.versionTarget}, levels ${session.levels.join(', ')}`);
-    lines.push('');
-    lines.push(`**Score: ${score.pct}%** (${score.meets} met / ${score.fails} didn't meet / ${score.na} N/A)`);
-    lines.push('');
-    lines.push('## Breakdown by principle');
-    Object.entries(score.breakdown).forEach(([name, b]) => {
-      lines.push(`- **${name}**: ${b.meets} met, ${b.fails} didn't meet, ${b.na} N/A`);
+    const push = (...xs) => lines.push(...xs);
+
+    push(`# ACCESSI-SWIPE accessibility report`, '');
+    push(`| | |`, `|---|---|`);
+    push(`| **Standard** | WCAG ${session.versionTarget}, Level ${levels.join(' + ')} |`);
+    push(`| **Date** | ${now.toLocaleString(undefined, { dateStyle: 'long', timeStyle: 'short' })} |`);
+    push(`| **Criteria checked** | ${answered} of ${session.order.length} |`, '');
+
+    push(`## Summary`, '');
+    push(`**${score.pct}% passing** — ${score.meets} met, ${score.fails} didn't meet, ${score.na} not applicable.`, '');
+    push(`| Principle | Passing | Met | Didn't meet | N/A |`, `|---|---:|---:|---:|---:|`);
+    PRINCIPLES.forEach(p => {
+      const b = score.breakdown[p];
+      push(`| ${p} | ${pctText(b.meets, b.fails)} | ${b.meets} | ${b.fails} | ${b.na} |`);
     });
-    lines.push('');
-    lines.push('## Gaps');
+    push('');
+
+    push(`## Gaps to fix (${score.fails})`, '');
     if (score.gaps.length === 0) {
-      lines.push('No gaps found.');
+      push('No gaps found — everything checked either met the criterion or was not applicable. 🎉', '');
     } else {
-      score.gaps.forEach(c => {
-        lines.push(`- [ ] **${c.id} ${c.name}** (Level ${c.level}, WCAG ${c.version})`);
+      push('Grouped by principle, Level A first (the most fundamental) within each group.', '');
+      PRINCIPLES.forEach(p => {
+        const gaps = score.gaps.filter(c => c.principle === p).sort(compareCriteria);
+        if (gaps.length === 0) return;
+        push(`### ${p} (${gaps.length})`, '');
+        gaps.forEach(c => {
+          push(`- [ ] **${c.id} ${c.name}** — Level ${c.level}, WCAG ${c.version}`);
+          push(`  - Check: ${c.q}`);
+          push(`  - Answer that fails: ${c.bad ? 'Yes' : 'No'}`);
+          if (c.note) push(`  - Note: ${c.note}`);
+          push(`  - Guidance: [Understanding ${c.id}](${understandingUrl(c)})`);
+        });
+        push('');
       });
     }
-    lines.push('');
-    lines.push('## Full results');
-    session.order.forEach(id => {
-      const c = criterionById(id);
-      const v = session.answers[id] || 'skipped';
-      lines.push(`- ${c.id} ${c.name} — ${v}`);
+
+    if (naList.length) {
+      push(`## Marked not applicable (${naList.length})`, '');
+      push('Worth a second look to confirm the content really doesn\'t apply.', '');
+      naList.forEach(c => push(`- ${c.id} ${c.name} (Level ${c.level})`));
+      push('');
+    }
+
+    push(`## All results`, '');
+    push(`| SC | Name | Level | Result |`, `|---|---|---|---|`);
+    session.order.map(criterionById).sort(compareCriteria).forEach(c => {
+      const v = session.answers[c.id];
+      push(`| [${c.id}](${understandingUrl(c)}) | ${c.name} | ${c.level} | ${v ? VERDICT_LABEL[v] : 'Skipped'} |`);
     });
-    downloadFile('accessi-swipe-results.md', lines.join('\n'), 'text/markdown');
+    push('');
+
+    push('---', '');
+    push(`_This is a self-assessment from [ACCESSI-SWIPE](${playUrl()}), not a formal conformance audit._`);
+    downloadFile(exportFilename('md', now), lines.join('\n'), 'text/markdown');
   }
 
   let copyStatusTimer = null;
