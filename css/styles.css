@@ -55,10 +55,27 @@ body {
   outline-offset: 2px;
 }
 
+/* Corner scales with the viewport; header keeps clear of it on both sides
+   so the centered title never sits underneath. */
+:root { --corner-size: clamp(56px, 13vw, 120px); }
+.github-corner svg {
+  width: var(--corner-size);
+  height: var(--corner-size);
+}
+.github-corner:focus-visible { outline: none; }
+.github-corner:focus-visible svg { outline: 3px solid var(--focus); outline-offset: -3px; }
+
 .app-header {
   text-align: center;
-  padding: 1.5rem 1rem 0.5rem;
+  padding: 1.5rem calc(var(--corner-size) * 0.75) 0.5rem;
 }
+.home-link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 8px;
+}
+.home-link:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.home-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
 .app-header h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
 .tagline { margin: 0; color: var(--text-dim); font-size: 0.95rem; }
 
