@@ -181,25 +181,71 @@
           </button>
         </div>
 
-        <div id="cardStack" class="card-stack"></div>
+        <div class="deck-stage">
+          <div class="tray tray-no" id="trayNo">
+            <div class="tray-box">
+              <svg class="tray-back" viewBox="0 0 140 110" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <polygon points="16,40 124,40 115,12 25,12" fill="#c48f5e" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="16,40 4,62 -8,46 3,24" fill="#b5804f" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="124,40 136,62 148,46 137,24" fill="#b5804f" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="16,40 124,40 136,62 4,62" fill="#4a2f19" />
+                <polygon points="16,40 124,40 126,46 14,46" fill="#5f3d21" />
+              </svg>
+              <div class="tray-cards" aria-hidden="true"></div>
+              <svg class="tray-front" viewBox="0 0 140 110" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <path d="M4,62 L136,62 L132,104 Q131.5,108 128,108 L12,108 Q8.5,108 8,104 Z" fill="#d9a873" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <line x1="5" y1="63.5" x2="135" y2="63.5" stroke="#f2cf9f" stroke-width="2" vector-effect="non-scaling-stroke" />
+                <rect x="63" y="63" width="14" height="10" fill="#ecd3a8" opacity="0.8" />
+              </svg>
+              <span class="tray-word">No</span>
+              <span class="tray-count"><span class="tray-count-num">0</span><span class="visually-hidden"> cards answered no</span></span>
+            </div>
+            <p class="tray-caption" aria-hidden="true">← swipe left</p>
+          </div>
+          <div id="cardStack" class="card-stack"></div>
+          <div class="tray tray-yes" id="trayYes">
+            <div class="tray-box">
+              <svg class="tray-back" viewBox="0 0 140 110" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <polygon points="16,40 124,40 115,12 25,12" fill="#c48f5e" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="16,40 4,62 -8,46 3,24" fill="#b5804f" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="124,40 136,62 148,46 137,24" fill="#b5804f" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <polygon points="16,40 124,40 136,62 4,62" fill="#4a2f19" />
+                <polygon points="16,40 124,40 126,46 14,46" fill="#5f3d21" />
+              </svg>
+              <div class="tray-cards" aria-hidden="true"></div>
+              <svg class="tray-front" viewBox="0 0 140 110" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <path d="M4,62 L136,62 L132,104 Q131.5,108 128,108 L12,108 Q8.5,108 8,104 Z" fill="#d9a873" stroke="#6e4524" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+                <line x1="5" y1="63.5" x2="135" y2="63.5" stroke="#f2cf9f" stroke-width="2" vector-effect="non-scaling-stroke" />
+                <rect x="63" y="63" width="14" height="10" fill="#ecd3a8" opacity="0.8" />
+              </svg>
+              <span class="tray-word">Yes</span>
+              <span class="tray-count"><span class="tray-count-num">0</span><span class="visually-hidden"> cards answered yes</span></span>
+            </div>
+            <p class="tray-caption" aria-hidden="true">swipe right →</p>
+          </div>
+        </div>
 
         <div
-          class="action-row"
+          class="action-pad"
           role="group"
-          aria-label="Verdict for this criterion"
+          aria-label="Your answer to this question"
         >
-          <button type="button" id="btnFail" class="btn btn-fail">
-            <span aria-hidden="true">✗</span> Fails
+          <button type="button" id="btnNo" class="btn btn-no">
+            <span aria-hidden="true">←</span> No
           </button>
           <button type="button" id="btnNA" class="btn btn-na">
-            <span aria-hidden="true">➖</span> N/A
+            <span aria-hidden="true">↑</span> N/A
           </button>
-          <button type="button" id="btnMeet" class="btn btn-meet">
-            <span aria-hidden="true">✓</span> Meets
+          <button type="button" id="btnUnsure" class="btn btn-unsure">
+            <span aria-hidden="true">↓</span> I don’t know
+          </button>
+          <button type="button" id="btnYes" class="btn btn-yes">
+            Yes <span aria-hidden="true">→</span>
           </button>
         </div>
         <p class="hint keys-hint">
-          Keyboard: ← fails · ↑ N/A · → meets · Z to undo
+          Swipe: ← no · → yes · ↓ don’t know · ↑ all the way up for N/A<br />
+          Keys: arrows to answer · H how to check · Z undo
         </p>
       </section>
 
@@ -226,6 +272,14 @@
             No gaps — everything in the deck passed or was N/A.
             <span aria-hidden="true">🎉</span>
           </p>
+        </div>
+
+        <div id="unsureSection" class="gap-section" hidden>
+          <h3>Not sure yet</h3>
+          <p class="hint">
+            You marked these “I don’t know”. Open one to see how to check it.
+          </p>
+          <ul id="unsureList" class="gap-list unsure-list"></ul>
         </div>
 
         <div class="share-section">
@@ -259,6 +313,7 @@
     </main>
 
     <script src="js/criteria-data.js"></script>
+    <script src="js/how-to-check.js"></script>
     <script src="js/confetti.js"></script>
     <script src="js/app.js"></script>
   </body>

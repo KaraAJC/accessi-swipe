@@ -4,6 +4,16 @@
   const STORAGE_KEY = 'wcagSwipeSession';
   const VERSION_ORDER = ['2.0', '2.1', '2.2'];
 
+  // How far the card has to travel before a drag counts as an answer.
+  // Up (N/A) needs a longer pull — "all the way" — so a sloppy swipe doesn't trigger it.
+  const SWIPE = { x: 120, up: 180, down: 120 };
+  const DIR_TO_CHOICE = { left: 'no', right: 'yes', up: 'na', down: 'unsure' };
+  const KEY_TO_CHOICE = { ArrowLeft: 'no', ArrowRight: 'yes', ArrowUp: 'na', ArrowDown: 'unsure' };
+  const FLY_MS = 420;
+  const TRAY_VISIBLE_MAX = 10;
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
   const el = (id) => document.getElementById(id);
   const screens = {
     setup: el('screen-setup'),
@@ -13,10 +23,18 @@
 
   function showScreen(name) {
     Object.entries(screens).forEach(([key, node]) => { node.hidden = key !== name; });
+    document.body.dataset.screen = name;
   }
 
   function announce(msg) {
     el('liveRegion').textContent = msg;
+  }
+
+  function make(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
   }
 
   function versionIndex(v) { return VERSION_ORDER.indexOf(v); }
@@ -42,9 +60,11 @@
   }
 
   // ---------------- state ----------------
-  let session = null; // { versionTarget, levels: [], order: [ids], index, answers: {id: verdict}, completed }
+  // session: { versionTarget, levels: [], order: [ids], index, answers: {id: verdict}, completed }
+  // verdict is one of: 'meets' | 'fails' | 'na' | 'unsure'
+  let session = null;
   let historyStack = []; // ids in swipe order, for undo
-  let dragState = null;
+  let finishTimer = null;
 
   function saveSession() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -73,6 +93,29 @@
     const hasProgress = sessionObj && sessionObj.answers && Object.keys(sessionObj.answers).length > 0;
     if (!hasProgress) return true;
     return window.confirm(message);
+  }
+
+  // W3C "Understanding" pages use a slug of the SC name. The WCAG 2.2 set
+  // covers every 2.0/2.1 criterion too (4.1.1 Parsing is kept as an obsolete page).
+  function understandingUrl(c) {
+    const slug = c.name.toLowerCase().replace(/[(),]/g, '').trim().replace(/\s+/g, '-');
+    return `https://www.w3.org/WAI/WCAG22/Understanding/${slug}`;
+  }
+
+  function howToCheckList(c) {
+    const ol = make('ol', 'how-steps');
+    const steps = c.how && c.how.length ? c.how : ['See the W3C guidance below for how to test this one.'];
+    steps.forEach(step => ol.appendChild(make('li', null, step)));
+    return ol;
+  }
+
+  function guidanceLink(c) {
+    const a = make('a', 'guidance-link', `W3C guidance for ${c.id}`);
+    a.href = understandingUrl(c);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.appendChild(make('span', 'visually-hidden', ' (opens in a new tab)'));
+    return a;
   }
 
   // ---------------- setup screen ----------------
@@ -183,86 +226,6 @@
     return criterionById(session.order[session.index]);
   }
 
-  function renderCard() {
-    const stack = el('cardStack');
-    stack.innerHTML = '';
-    const c = currentCriterion();
-
-    el('progressText').textContent = `${session.index} / ${session.order.length}`;
-    el('btnUndo').disabled = historyStack.length === 0;
-
-    if (!c) {
-      finishDeck();
-      return;
-    }
-
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.id = 'activeCard';
-    card.tabIndex = 0;
-    card.setAttribute('role', 'group');
-    card.setAttribute('aria-roledescription', 'question card');
-
-    const badges = document.createElement('div');
-    badges.className = 'card-badges';
-    badges.innerHTML = `
-      <span class="badge badge-level-${c.level}">${c.level}</span>
-      <span class="badge">WCAG ${c.version}</span>
-      <span class="badge">${c.principle}</span>
-      ${c.removedIn ? `<span class="badge badge-removed">removed in ${c.removedIn}</span>` : ''}
-    `;
-
-    const idLine = document.createElement('p');
-    idLine.className = 'card-id';
-    idLine.textContent = `Success Criterion ${c.id}`;
-
-    const nameLine = document.createElement('p');
-    nameLine.className = 'card-name';
-    nameLine.textContent = c.name;
-
-    const question = document.createElement('p');
-    question.className = 'card-question';
-    question.textContent = c.q;
-
-    const senseLabel = c.bad ? 'If the answer is yes, this fails.' : 'If the answer is yes, this passes.';
-    const sense = document.createElement('p');
-    sense.className = 'card-sense' + (c.bad ? ' is-bad' : '');
-    sense.textContent = (c.bad ? '⚠️ ' : '') + senseLabel;
-
-    card.appendChild(badges);
-    card.appendChild(idLine);
-    card.appendChild(nameLine);
-    card.appendChild(question);
-    card.appendChild(sense);
-
-    if (c.note) {
-      const note = document.createElement('p');
-      note.className = 'card-note';
-      note.textContent = c.note;
-      card.appendChild(note);
-    }
-
-    // aria-label carries the full question + hint + note so screen reader users
-    // get everything on focus, not just what's reachable via a separate browse pass.
-    card.setAttribute('aria-label',
-      `${c.id} ${c.name}. ${c.q} ${senseLabel}${c.note ? ' ' + c.note : ''}`);
-
-    const stampLeft = document.createElement('div');
-    stampLeft.className = 'card-stamp stamp-left';
-    stampLeft.textContent = 'NO';
-    stampLeft.setAttribute('aria-hidden', 'true');
-    const stampRight = document.createElement('div');
-    stampRight.className = 'card-stamp stamp-right';
-    stampRight.textContent = 'YES';
-    stampRight.setAttribute('aria-hidden', 'true');
-    card.appendChild(stampLeft);
-    card.appendChild(stampRight);
-
-    stack.appendChild(card);
-    attachDrag(card, stampLeft, stampRight, c);
-    card.focus();
-  }
-
   // Drag direction answers the literal question (right = yes, left = no);
   // `bad` flips which literal answer counts as passing.
   function verdictFromAnswer(answer, bad) {
@@ -271,43 +234,180 @@
     return passes ? 'meets' : 'fails';
   }
 
-  function attachDrag(card, stampLeft, stampRight, criterion) {
-    let startX = 0, startY = 0, dx = 0, dragging = false;
+  // Inverse of verdictFromAnswer: which tray a meets/fails card landed in.
+  function literalAnswer(c, verdict) {
+    if (verdict !== 'meets' && verdict !== 'fails') return null;
+    const passes = verdict === 'meets';
+    return (c.bad ? !passes : passes) ? 'yes' : 'no';
+  }
 
+  // `newlyAnsweredId` is set when called right after an answer, so the tray
+  // can animate that card dropping in.
+  function renderCard(newlyAnsweredId) {
+    clearTimeout(finishTimer);
+    const stack = el('cardStack');
+    stack.innerHTML = '';
+    const c = currentCriterion();
+
+    el('progressText').textContent = `${session.index} / ${session.order.length}`;
+    el('btnUndo').disabled = historyStack.length === 0;
+    renderTrays(newlyAnsweredId);
+
+    if (!c) {
+      // Let the last card land in its tray before switching screens.
+      const delay = newlyAnsweredId && !reducedMotion.matches ? FLY_MS + 500 : 0;
+      finishTimer = setTimeout(finishDeck, delay);
+      return;
+    }
+
+    const card = buildCard(c);
+    stack.appendChild(card);
+    attachDrag(card);
+    card.querySelector('.card-front').focus();
+  }
+
+  function buildCard(c) {
+    const card = make('div', 'card');
+    card.id = 'activeCard';
+    const inner = make('div', 'card-inner');
+
+    // ----- front: the question -----
+    const front = make('div', 'card-face card-front');
+    front.tabIndex = 0;
+    front.setAttribute('role', 'group');
+    front.setAttribute('aria-roledescription', 'question card');
+
+    const badges = make('div', 'card-badges');
+    badges.innerHTML = `
+      <span class="badge badge-level-${c.level}">${c.level}</span>
+      <span class="badge">WCAG ${c.version}</span>
+      <span class="badge">${c.principle}</span>
+      ${c.removedIn ? `<span class="badge badge-removed">removed in ${c.removedIn}</span>` : ''}
+    `;
+
+    const senseLabel = c.bad ? 'If the answer is yes, this fails.' : 'If the answer is yes, this passes.';
+    front.append(
+      badges,
+      make('p', 'card-id', `Success Criterion ${c.id}`),
+      make('p', 'card-name', c.name),
+      make('p', 'card-question', c.q),
+      make('p', 'card-sense' + (c.bad ? ' is-bad' : ''), (c.bad ? '⚠️ ' : '') + senseLabel)
+    );
+    if (c.note) front.appendChild(make('p', 'card-note', c.note));
+
+    const hintBtn = make('button', 'btn btn-ghost btn-small card-flip-btn');
+    hintBtn.type = 'button';
+    hintBtn.innerHTML = '<span aria-hidden="true">💡</span> How do I check this?';
+    hintBtn.addEventListener('click', () => toggleHint(true));
+    front.appendChild(hintBtn);
+
+    // aria-label carries the full question + sense + note so screen reader users
+    // get everything on focus, not just what's reachable via a separate browse pass.
+    front.setAttribute('aria-label',
+      `${c.id} ${c.name}. ${c.q} ${senseLabel}${c.note ? ' ' + c.note : ''}`);
+
+    [['left', 'No'], ['right', 'Yes'], ['up', 'N/A'], ['down', 'Don’t know']].forEach(([dir, label]) => {
+      const stamp = make('div', `card-stamp stamp-${dir}`, label);
+      stamp.dataset.dir = dir;
+      stamp.setAttribute('aria-hidden', 'true');
+      front.appendChild(stamp);
+    });
+
+    // ----- back: how to check -----
+    const back = make('div', 'card-face card-back');
+    back.tabIndex = -1;
+    back.setAttribute('role', 'group');
+    back.setAttribute('aria-label', `How to check ${c.id} ${c.name}`);
+    back.inert = true;
+
+    const backBtn = make('button', 'btn btn-ghost btn-small card-flip-btn');
+    backBtn.type = 'button';
+    backBtn.innerHTML = '<span aria-hidden="true">↩</span> Back to the question';
+    backBtn.addEventListener('click', () => toggleHint(false));
+
+    back.append(
+      make('p', 'card-id', '💡 How to check'),
+      make('p', 'card-name', `${c.id} ${c.name}`),
+      howToCheckList(c),
+      guidanceLink(c),
+      backBtn
+    );
+
+    inner.append(front, back);
+    card.appendChild(inner);
+    return card;
+  }
+
+  function toggleHint(force) {
+    const card = el('activeCard');
+    if (!card) return;
+    const flipped = typeof force === 'boolean' ? force : !card.classList.contains('is-flipped');
+    card.classList.toggle('is-flipped', flipped);
+    const front = card.querySelector('.card-front');
+    const back = card.querySelector('.card-back');
+    front.inert = flipped;
+    back.inert = !flipped;
+    if (flipped) back.scrollTop = 0;
+    (flipped ? back : front).focus();
+  }
+
+  // Which way the card is being pulled, and how close it is (0–1) to committing.
+  function dragIntent(dx, dy) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return null;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return { dir: dx > 0 ? 'right' : 'left', ratio: Math.min(Math.abs(dx) / SWIPE.x, 1) };
+    }
+    return dy < 0
+      ? { dir: 'up', ratio: Math.min(-dy / SWIPE.up, 1) }
+      : { dir: 'down', ratio: Math.min(dy / SWIPE.down, 1) };
+  }
+
+  function highlightTray(dir) {
+    el('trayNo').classList.toggle('is-target', dir === 'left');
+    el('trayYes').classList.toggle('is-target', dir === 'right');
+  }
+
+  function attachDrag(card) {
+    const stamps = {};
+    card.querySelectorAll('.card-stamp').forEach(s => { stamps[s.dataset.dir] = s; });
+    let startX = 0, startY = 0, dx = 0, dy = 0, dragging = false;
+
+    function reset() {
+      card.classList.remove('is-dragging');
+      card.style.transform = '';
+      Object.values(stamps).forEach(s => { s.style.opacity = 0; });
+      highlightTray(null);
+    }
     function onPointerDown(ev) {
+      if (ev.button !== 0 || card.classList.contains('is-flipped')) return;
+      if (ev.target.closest('button, a')) return;
       dragging = true;
+      dx = dy = 0;
       startX = ev.clientX;
       startY = ev.clientY;
       card.setPointerCapture(ev.pointerId);
+      card.classList.add('is-dragging');
     }
     function onPointerMove(ev) {
       if (!dragging) return;
       dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      const rotate = dx / 20;
-      card.style.transform = `translate(${dx}px, ${dy}px) rotate(${rotate}deg)`;
-      const ratio = Math.min(Math.abs(dx) / 140, 1);
-      if (dx > 0) {
-        stampRight.style.opacity = ratio;
-        stampLeft.style.opacity = 0;
-      } else {
-        stampLeft.style.opacity = ratio;
-        stampRight.style.opacity = 0;
-      }
+      dy = ev.clientY - startY;
+      card.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
+      const intent = dragIntent(dx, dy);
+      Object.entries(stamps).forEach(([dir, s]) => {
+        s.style.opacity = intent && intent.dir === dir ? intent.ratio : 0;
+      });
+      highlightTray(intent && intent.ratio >= 1 ? intent.dir : null);
     }
     function onPointerUp() {
       if (!dragging) return;
       dragging = false;
-      if (dx > 120) {
-        applyVerdict(verdictFromAnswer('yes', criterion.bad));
-      } else if (dx < -120) {
-        applyVerdict(verdictFromAnswer('no', criterion.bad));
+      const intent = dragIntent(dx, dy);
+      if (intent && intent.ratio >= 1) {
+        answer(DIR_TO_CHOICE[intent.dir]);
       } else {
-        card.style.transform = '';
-        stampLeft.style.opacity = 0;
-        stampRight.style.opacity = 0;
+        reset();
       }
-      dx = 0;
     }
 
     card.addEventListener('pointerdown', onPointerDown);
@@ -316,16 +416,63 @@
     card.addEventListener('pointercancel', onPointerUp);
   }
 
-  function applyVerdict(verdict) {
+  // Lifts the current card out of the stack and animates it into a tray
+  // (yes/no) or off the top (N/A) / bottom (don't know) of the screen.
+  function flyAway(choice) {
+    highlightTray(null);
+    const card = el('activeCard');
+    if (!card || reducedMotion.matches) return;
+
+    const from = el('cardStack').getBoundingClientRect();
+    card.removeAttribute('id');
+    card.setAttribute('aria-hidden', 'true');
+    card.inert = true;
+    card.classList.add('is-flying');
+    Object.assign(card.style, {
+      position: 'fixed',
+      left: `${from.left}px`,
+      top: `${from.top}px`,
+      width: `${from.width}px`,
+      height: `${from.height}px`,
+    });
+    document.body.appendChild(card);
+
+    let target;
+    if (choice === 'yes' || choice === 'no') {
+      const box = el(choice === 'yes' ? 'trayYes' : 'trayNo').querySelector('.tray-box').getBoundingClientRect();
+      const tx = box.left + box.width / 2 - (from.left + from.width / 2);
+      const ty = box.top + box.height * 0.4 - (from.top + from.height / 2);
+      target = `translate(${tx}px, ${ty}px) rotate(${choice === 'yes' ? 20 : -20}deg) scale(0.1)`;
+    } else if (choice === 'na') {
+      target = `translate(0, ${-(from.bottom + 60)}px) rotate(-4deg)`;
+    } else {
+      target = `translate(0, ${window.innerHeight - from.top + 60}px) rotate(4deg)`;
+    }
+
+    card.getBoundingClientRect(); // lock in the start position before transitioning
+    card.style.transition = `transform ${FLY_MS}ms cubic-bezier(.5,0,.6,1), opacity ${FLY_MS}ms ease-in`;
+    card.style.transform = target;
+    card.style.opacity = (choice === 'yes' || choice === 'no') ? '0.4' : '0';
+    setTimeout(() => card.remove(), FLY_MS + 60);
+  }
+
+  function answerLabel(choice, verdict) {
+    if (choice === 'na') return 'marked not applicable';
+    if (choice === 'unsure') return 'marked I don’t know. It’s listed on your scorecard with how to check it';
+    return `answered ${choice}, so it ${verdict === 'meets' ? 'meets' : 'doesn’t meet'} the criterion`;
+  }
+
+  function answer(choice) {
     const c = currentCriterion();
     if (!c) return;
+    const verdict = (choice === 'yes' || choice === 'no') ? verdictFromAnswer(choice, c.bad) : choice;
+    flyAway(choice);
     session.answers[c.id] = verdict;
     historyStack.push(c.id);
     session.index += 1;
     saveSession();
-    const label = { meets: 'Meets', fails: 'Fails', na: 'Not applicable' }[verdict];
-    announce(`${c.id} marked: ${label}. ${session.index} of ${session.order.length} done.`);
-    renderCard();
+    announce(`${c.id} ${answerLabel(choice, verdict)}. ${session.index} of ${session.order.length} done.`);
+    renderCard(c.id);
   }
 
   function undoLast() {
@@ -338,7 +485,43 @@
     renderCard();
   }
 
+  // ---------------- trays ----------------
+  function renderTrays(newId) {
+    const piles = { yes: [], no: [] };
+    session.order.slice(0, session.index).forEach(id => {
+      const c = criterionById(id);
+      const side = literalAnswer(c, session.answers[id]);
+      if (side) piles[side].push({ c, verdict: session.answers[id] });
+    });
+
+    [['yes', 'trayYes'], ['no', 'trayNo']].forEach(([side, trayId]) => {
+      const tray = el(trayId);
+      const pile = piles[side];
+      tray.querySelector('.tray-count-num').textContent = pile.length;
+
+      const holder = tray.querySelector('.tray-cards');
+      holder.innerHTML = '';
+      pile.slice(-TRAY_VISIBLE_MAX).forEach((item, i) => {
+        const mini = make('div', `mini-card is-${item.verdict}`, item.c.id);
+        // Stable, slightly messy tilt per card so the pile looks hand-tossed.
+        const seed = item.c.id.split('').reduce((n, ch) => n + ch.charCodeAt(0), 0);
+        mini.style.setProperty('--i', i);
+        mini.style.setProperty('--r', `${(seed % 11) - 5}deg`);
+        if (item.c.id === newId) mini.classList.add('is-new');
+        holder.appendChild(mini);
+      });
+
+      const box = tray.querySelector('.tray-box');
+      box.classList.remove('is-bumping');
+      if (newId && pile.some(item => item.c.id === newId)) {
+        void box.offsetWidth; // restart the bump animation
+        box.classList.add('is-bumping');
+      }
+    });
+  }
+
   function finishDeck() {
+    if (!session || session.index < session.order.length || screens.deck.hidden) return;
     session.completed = true;
     saveSession();
     renderResults();
@@ -347,37 +530,53 @@
   }
 
   function handleDeckKeydown(ev) {
-    if (screens.deck.hidden) return;
-    if (ev.key === 'ArrowRight') { ev.preventDefault(); applyVerdict('meets'); }
-    else if (ev.key === 'ArrowLeft') { ev.preventDefault(); applyVerdict('fails'); }
-    else if (ev.key === 'ArrowUp') { ev.preventDefault(); applyVerdict('na'); }
-    else if (ev.key.toLowerCase() === 'z') { ev.preventDefault(); undoLast(); }
+    if (screens.deck.hidden || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const choice = KEY_TO_CHOICE[ev.key];
+    if (choice) {
+      ev.preventDefault();
+      if (!ev.repeat) answer(choice);
+      return;
+    }
+    const card = el('activeCard');
+    if (ev.key === 'Escape' && card && card.classList.contains('is-flipped')) {
+      ev.preventDefault();
+      toggleHint(false);
+    } else if (ev.key.toLowerCase() === 'h') {
+      ev.preventDefault();
+      toggleHint();
+    } else if (ev.key.toLowerCase() === 'z') {
+      ev.preventDefault();
+      undoLast();
+    }
   }
 
   // ---------------- results screen ----------------
+  function emptyTally() { return { meets: 0, fails: 0, na: 0, unsure: 0 }; }
+
   function computeScore() {
     const breakdown = {
-      Perceivable: { meets: 0, fails: 0, na: 0 },
-      Operable: { meets: 0, fails: 0, na: 0 },
-      Understandable: { meets: 0, fails: 0, na: 0 },
-      Robust: { meets: 0, fails: 0, na: 0 },
+      Perceivable: emptyTally(),
+      Operable: emptyTally(),
+      Understandable: emptyTally(),
+      Robust: emptyTally(),
     };
     const gaps = [];
-    let meets = 0, fails = 0, na = 0;
+    const unsureList = [];
+    const totals = emptyTally();
 
     session.order.forEach(id => {
       const c = criterionById(id);
       const verdict = session.answers[id];
-      if (!verdict) return;
-      const b = breakdown[c.principle];
-      if (verdict === 'meets') { meets++; if (b) b.meets++; }
-      else if (verdict === 'fails') { fails++; if (b) b.fails++; gaps.push(c); }
-      else { na++; if (b) b.na++; }
+      if (!verdict || !(verdict in totals)) return;
+      totals[verdict]++;
+      if (breakdown[c.principle]) breakdown[c.principle][verdict]++;
+      if (verdict === 'fails') gaps.push(c);
+      if (verdict === 'unsure') unsureList.push(c);
     });
 
-    const scored = meets + fails;
-    const pct = scored === 0 ? 0 : Math.round((meets / scored) * 100);
-    return { meets, fails, na, pct, breakdown, gaps };
+    const scored = totals.meets + totals.fails;
+    const pct = scored === 0 ? 0 : Math.round((totals.meets / scored) * 100);
+    return { ...totals, pct, breakdown, gaps, unsureList };
   }
 
   function playUrl() {
@@ -387,13 +586,15 @@
   function buildShareText(score) {
     const b = score.breakdown;
     const pctOf = (x) => (x.meets + x.fails) === 0 ? '—' : `${Math.round((x.meets / (x.meets + x.fails)) * 100)}%`;
-    return [
+    const lines = [
       `🏁 ACCESSI-SWIPE — tested against WCAG ${session.versionTarget} (${session.levels.join('/')})`,
       `✅ ${score.pct}% passing (${score.meets}/${score.meets + score.fails})`,
       `👁️ Perceivable ${pctOf(b.Perceivable)} · 🕹️ Operable ${pctOf(b.Operable)} · 🧠 Understandable ${pctOf(b.Understandable)} · 🤖 Robust ${pctOf(b.Robust)}`,
       `⚠️ ${score.fails} gap${score.fails === 1 ? '' : 's'} found`,
-      `Play: ${playUrl()}`,
-    ].join('\n');
+    ];
+    if (score.unsure) lines.push(`❓ ${score.unsure} still to look into`);
+    lines.push(`Play: ${playUrl()}`);
+    return lines.join('\n');
   }
 
   function renderResults() {
@@ -401,12 +602,14 @@
 
     el('scoreBig').textContent = `${score.pct}%`;
     el('scoreSub').textContent =
-      `${score.meets} met · ${score.fails} didn't meet · ${score.na} N/A (WCAG ${session.versionTarget}, ${session.levels.join('/')})`;
+      `${score.meets} met · ${score.fails} didn't meet · ${score.na} N/A` +
+      (score.unsure ? ` · ${score.unsure} not sure` : '') +
+      ` (WCAG ${session.versionTarget}, ${session.levels.join('/')})`;
 
     const principleEl = el('principleBreakdown');
     principleEl.innerHTML = '';
     Object.entries(score.breakdown).forEach(([name, b]) => {
-      const total = b.meets + b.fails + b.na;
+      const total = b.meets + b.fails + b.na + b.unsure;
       const row = document.createElement('div');
       row.className = 'principle-row';
       const pct = (b.meets + b.fails) === 0 ? '—' : `${Math.round((b.meets / (b.meets + b.fails)) * 100)}%`;
@@ -417,6 +620,7 @@
             <div class="pb-meet" style="width:${(b.meets / total) * 100}%"></div>
             <div class="pb-fail" style="width:${(b.fails / total) * 100}%"></div>
             <div class="pb-na" style="width:${(b.na / total) * 100}%"></div>
+            <div class="pb-unsure" style="width:${(b.unsure / total) * 100}%"></div>
           `}
         </div>
       `;
@@ -430,11 +634,25 @@
     } else {
       el('noGaps').hidden = true;
       score.gaps.forEach(c => {
-        const li = document.createElement('li');
-        li.textContent = `${c.id} — ${c.name} (Level ${c.level}, WCAG ${c.version})`;
-        gapList.appendChild(li);
+        gapList.appendChild(make('li', null, `${c.id} — ${c.name} (Level ${c.level}, WCAG ${c.version})`));
       });
     }
+
+    const unsureList = el('unsureList');
+    unsureList.innerHTML = '';
+    el('unsureSection').hidden = score.unsureList.length === 0;
+    score.unsureList.forEach(c => {
+      const li = make('li');
+      const details = make('details');
+      details.append(
+        make('summary', null, `${c.id} — ${c.name} (Level ${c.level}, WCAG ${c.version})`),
+        make('p', 'unsure-question', c.q),
+        howToCheckList(c),
+        guidanceLink(c)
+      );
+      li.appendChild(details);
+      unsureList.appendChild(li);
+    });
 
     el('shareText').value = buildShareText(score);
   }
@@ -453,14 +671,7 @@
 
   const LEVEL_ORDER = ['A', 'AA', 'AAA'];
   const PRINCIPLES = ['Perceivable', 'Operable', 'Understandable', 'Robust'];
-  const VERDICT_LABEL = { meets: '✅ Meets', fails: '❌ Doesn\'t meet', na: '➖ N/A' };
-
-  // W3C "Understanding" pages use a slug of the SC name. The WCAG 2.2 set
-  // covers every 2.0/2.1 criterion too (4.1.1 Parsing is kept as an obsolete page).
-  function understandingUrl(c) {
-    const slug = c.name.toLowerCase().replace(/[(),]/g, '').trim().replace(/\s+/g, '-');
-    return `https://www.w3.org/WAI/WCAG22/Understanding/${slug}`;
-  }
+  const VERDICT_LABEL = { meets: '✅ Meets', fails: '❌ Doesn\'t meet', na: '➖ N/A', unsure: '❓ Not sure' };
 
   function compareCriteria(a, b) {
     const lv = LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level);
@@ -492,13 +703,14 @@
       generatedAt: now.toISOString(),
       wcagVersion: session.versionTarget,
       levels: session.levels,
-      summary: { pct: score.pct, meets: score.meets, fails: score.fails, na: score.na },
+      summary: { pct: score.pct, meets: score.meets, fails: score.fails, na: score.na, unsure: score.unsure },
       principleBreakdown: score.breakdown,
       answers: session.order.map(id => {
         const c = criterionById(id);
         return {
           id: c.id, name: c.name, level: c.level, version: c.version,
           principle: c.principle, verdict: session.answers[id] || null,
+          howToCheck: c.how || [],
           understandingUrl: understandingUrl(c),
         };
       }),
@@ -523,11 +735,11 @@
     push(`| **Criteria checked** | ${answered} of ${session.order.length} |`, '');
 
     push(`## Summary`, '');
-    push(`**${score.pct}% passing** — ${score.meets} met, ${score.fails} didn't meet, ${score.na} not applicable.`, '');
-    push(`| Principle | Passing | Met | Didn't meet | N/A |`, `|---|---:|---:|---:|---:|`);
+    push(`**${score.pct}% passing** — ${score.meets} met, ${score.fails} didn't meet, ${score.na} not applicable, ${score.unsure} not sure yet.`, '');
+    push(`| Principle | Passing | Met | Didn't meet | N/A | Not sure |`, `|---|---:|---:|---:|---:|---:|`);
     PRINCIPLES.forEach(p => {
       const b = score.breakdown[p];
-      push(`| ${p} | ${pctText(b.meets, b.fails)} | ${b.meets} | ${b.fails} | ${b.na} |`);
+      push(`| ${p} | ${pctText(b.meets, b.fails)} | ${b.meets} | ${b.fails} | ${b.na} | ${b.unsure} |`);
     });
     push('');
 
@@ -549,6 +761,18 @@
         });
         push('');
       });
+    }
+
+    if (score.unsureList.length) {
+      push(`## Not sure yet (${score.unsureList.length})`, '');
+      push('These were marked "I don\'t know". Here\'s how to check each one.', '');
+      score.unsureList.slice().sort(compareCriteria).forEach(c => {
+        push(`- [ ] **${c.id} ${c.name}** — Level ${c.level}, WCAG ${c.version}`);
+        push(`  - Check: ${c.q}`);
+        (c.how || []).forEach((step, i) => push(`  ${i + 1}. ${step}`));
+        push(`  - Guidance: [Understanding ${c.id}](${understandingUrl(c)})`);
+      });
+      push('');
     }
 
     if (naList.length) {
@@ -597,15 +821,18 @@
 
   // ---------------- wiring ----------------
   function init() {
+    document.body.dataset.screen = 'setup';
     initSetupScreen();
 
-    el('btnMeet').addEventListener('click', () => applyVerdict('meets'));
-    el('btnFail').addEventListener('click', () => applyVerdict('fails'));
-    el('btnNA').addEventListener('click', () => applyVerdict('na'));
+    el('btnYes').addEventListener('click', () => answer('yes'));
+    el('btnNo').addEventListener('click', () => answer('no'));
+    el('btnNA').addEventListener('click', () => answer('na'));
+    el('btnUnsure').addEventListener('click', () => answer('unsure'));
     el('btnUndo').addEventListener('click', undoLast);
     document.addEventListener('keydown', handleDeckKeydown);
 
     el('btnExit').addEventListener('click', () => {
+      clearTimeout(finishTimer);
       announce('Exited to home. Your progress is saved — resume anytime.');
       showScreen('setup');
       refreshDeckCount();
