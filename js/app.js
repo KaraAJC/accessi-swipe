@@ -187,7 +187,10 @@
   function initSetupScreen() {
     document.querySelectorAll('#setupForm input').forEach(input => {
       input.addEventListener('change', refreshDeckCount);
-      input.addEventListener('input', refreshDeckCount);
+      // The count box only gets tidied on `change` (blur or Enter). Re-running
+      // on every keystroke refilled it the moment it was cleared, so you
+      // couldn't delete the number and type your own.
+      if (input.id !== 'cardCountInput') input.addEventListener('input', refreshDeckCount);
     });
     refreshDeckCount();
     refreshResumeBanner();
